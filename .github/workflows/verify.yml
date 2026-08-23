@@ -1,0 +1,96 @@
+name: Verify standalone artifact
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "BuildAll.lean"
+      - "PrimalitySheafVerification/**"
+      - "lakefile.lean"
+      - "lake-manifest.json"
+      - "lean-toolchain"
+      - "scripts/audit_lean.py"
+      - ".github/workflows/verify.yml"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out the exact revision
+        uses: actions/checkout@v4
+
+      - name: Install elan and the pinned Lean toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.elan/bin:$PATH"
+          elan --version
+          lake --version
+          lake env lean --version
+
+      - name: Verify dependency lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          test -f lake-manifest.json
+          cp lake-manifest.json /tmp/lake-manifest.before.json
+          lake update
+          diff -u /tmp/lake-manifest.before.json lake-manifest.json
+
+      - name: Download Mathlib cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          mkdir -p verification-evidence
+          lake exe cache get 2>&1 | tee verification-evidence/cache.log
+
+      - name: Audit prohibited Lean features
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/audit_lean.py \
+            --json-out verification-evidence/forbidden-audit.json \
+            --text-out verification-evidence/forbidden-audit.txt
+
+      - name: Clean aggregate build
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          rm -rf .lake/build
+          /usr/bin/time -v lake build ResearchPaperFormalizationAudit \
+            2>&1 | tee verification-evidence/build.log
+
+      - name: Replay public aggregate entry point
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          /usr/bin/time -v lake env lean BuildAll.lean \
+            2>&1 | tee verification-evidence/replay.log
+
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: verification-evidence/
+          if-no-files-found: warn
+          retention-days: 90
