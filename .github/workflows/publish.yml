@@ -1,0 +1,361 @@
+name: Publish verified standalone release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: publish-standalone-v1
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPOSITORY: leegahuyn/mathlib4
+  SOURCE_REF: frozen-pre-release-2026-08-24
+  SOURCE_SHA: 3fa18fa989b78eb5bd7068122ced45fc2b6a7b74
+  MATHLIB_SHA: 93594942ef3b93fae5272d7bf368676ff40f8eb1
+  LEAN_TOOLCHAIN: leanprover/lean4:v4.33.0-rc1
+  RELEASE_VERSION: 1.0.0
+  RELEASE_TAG: v1.0.0
+  MANUSCRIPT_SHA256: 12eb737301b3312dbad255f7b6d2f74c43c9ba27a2955157c134d36c9c0e53c5
+  EVIDENCE_DIR: evidence/release-v1.0.0
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out standalone publication repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch and verify the frozen source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf _source "$EVIDENCE_DIR"
+          mkdir -p "$EVIDENCE_DIR"
+
+          git clone \
+            --filter=blob:none \
+            --no-checkout \
+            --depth 1 \
+            --branch "$SOURCE_REF" \
+            "https://github.com/$SOURCE_REPOSITORY.git" \
+            _source
+
+          git -C _source sparse-checkout init --cone
+          git -C _source sparse-checkout set PrimalitySheafVerification
+          git -C _source checkout --detach "$SOURCE_SHA"
+
+          observed_source_sha="$(git -C _source rev-parse HEAD)"
+          printf '%s\n' "$observed_source_sha" \
+            | tee "$EVIDENCE_DIR/observed-source-commit.txt"
+          test "$observed_source_sha" = "$SOURCE_SHA"
+
+          git -C _source fetch --no-tags --depth 1 origin "$MATHLIB_SHA"
+          git -C _source diff --name-only \
+            "$MATHLIB_SHA" "$SOURCE_SHA" -- \
+            Mathlib Mathlib.lean lakefile.lean lean-toolchain \
+            > "$EVIDENCE_DIR/source-core-diff.txt"
+
+          if [[ -s "$EVIDENCE_DIR/source-core-diff.txt" ]]; then
+            echo "The frozen source modifies the pinned Mathlib/toolchain boundary:"
+            cat "$EVIDENCE_DIR/source-core-diff.txt"
+            exit 1
+          fi
+
+      - name: Materialize the standalone Lean source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf PrimalitySheafVerification
+          mkdir -p PrimalitySheafVerification
+
+          rsync -a \
+            --include='*/' \
+            --include='*.lean' \
+            --exclude='*' \
+            _source/PrimalitySheafVerification/ \
+            PrimalitySheafVerification/
+
+          cp _source/BuildAll.lean BuildAll.lean
+          cp _source/LICENSE LICENSE
+          cp _source/lean-toolchain lean-toolchain
+
+          grep -Fx "$LEAN_TOOLCHAIN" lean-toolchain
+
+          required=(
+            BuildAll.lean
+            Verification.lean
+            Spt1.lean
+            Spt2.lean
+            Spt3.lean
+            Spt4.lean
+            Spt5.lean
+            Spt6.lean
+            Spt7.lean
+            Mock1.lean
+            Mock1_Advanced.lean
+            Mock2.lean
+            Mock2_Advanced.lean
+            Mock2_FunctionalAnalysis.lean
+            Mock2_FunctionalAnalysis_Integrated.lean
+            QYM.lean
+            Mock3.lean
+          )
+
+          for file in "${required[@]}"; do
+            test -f "PrimalitySheafVerification/$file"
+          done
+
+          find PrimalitySheafVerification -type f -name '*.lean' -print0 \
+            | sort -z \
+            | xargs -0 wc -l \
+            | tee "$EVIDENCE_DIR/prebuild-line-counts.txt"
+
+      - name: Install elan and the pinned Lean toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.elan/bin:$PATH"
+          elan --version
+          lake --version
+          lake env lean --version
+
+      - name: Resolve the pinned dependency graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          lake update 2>&1 | tee "$EVIDENCE_DIR/lake-update.log"
+          test -f lake-manifest.json
+
+      - name: Download the Mathlib cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          lake exe cache get 2>&1 | tee "$EVIDENCE_DIR/cache.log"
+
+      - name: Audit prohibited Lean features
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/audit_lean.py \
+            --json-out "$EVIDENCE_DIR/forbidden-audit.json" \
+            --text-out "$EVIDENCE_DIR/forbidden-audit.txt"
+
+      - name: First clean aggregate build
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          rm -rf .lake/build
+          /usr/bin/time -v lake build ResearchPaperFormalizationAudit \
+            2>&1 | tee "$EVIDENCE_DIR/build-clean-1.log"
+
+      - name: First direct aggregate replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          /usr/bin/time -v lake env lean BuildAll.lean \
+            2>&1 | tee "$EVIDENCE_DIR/replay-1.log"
+
+      - name: Second clean aggregate build
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          rm -rf .lake/build
+          /usr/bin/time -v lake build ResearchPaperFormalizationAudit \
+            2>&1 | tee "$EVIDENCE_DIR/build-clean-2.log"
+
+      - name: Second direct aggregate replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          /usr/bin/time -v lake env lean BuildAll.lean \
+            2>&1 | tee "$EVIDENCE_DIR/replay-2.log"
+
+      - name: Generate hashes, inventory, and environment evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          python3 scripts/generate_evidence.py \
+            --evidence-dir "$EVIDENCE_DIR" \
+            --version "$RELEASE_VERSION" \
+            --release-repository "$GITHUB_REPOSITORY" \
+            --source-repository "$SOURCE_REPOSITORY" \
+            --source-ref "$SOURCE_REF" \
+            --source-sha "$SOURCE_SHA" \
+            --mathlib-sha "$MATHLIB_SHA" \
+            --manuscript-sha256 "$MANUSCRIPT_SHA256"
+
+      - name: Apply repository description, default branch, and topics
+        shell: bash
+        env:
+          ADMIN_TOKEN: ${{ secrets.REPOSITORY_ADMIN_TOKEN }}
+          WORKFLOW_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          if [[ -n "${ADMIN_TOKEN:-}" ]]; then
+            export GH_TOKEN="$ADMIN_TOKEN"
+            token_source="REPOSITORY_ADMIN_TOKEN"
+          else
+            export GH_TOKEN="$WORKFLOW_TOKEN"
+            token_source="github.token"
+          fi
+
+          set +e
+          gh api \
+            --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$GITHUB_REPOSITORY" \
+            -f description='AI-assisted Lean 4/Mathlib audit of 10 mathematical manuscript sketches (507 pages), with proofs, assumptions, corrections, counterexamples, and reproducible evidence.' \
+            -f homepage="https://github.com/$GITHUB_REPOSITORY" \
+            -f default_branch='main' \
+            > "$EVIDENCE_DIR/repository-patch-response.json" \
+            2> "$EVIDENCE_DIR/repository-patch-error.txt"
+          repository_patch_exit=$?
+
+          cat > /tmp/topics.json <<'JSON'
+          {
+            "names": [
+              "lean4",
+              "mathlib",
+              "formal-mathematics",
+              "theorem-proving",
+              "formal-verification",
+              "ai-assisted-mathematics"
+            ]
+          }
+          JSON
+
+          gh api \
+            --method PUT \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$GITHUB_REPOSITORY/topics" \
+            --input /tmp/topics.json \
+            > "$EVIDENCE_DIR/topics-response.json" \
+            2> "$EVIDENCE_DIR/topics-error.txt"
+          topics_exit=$?
+          set -e
+
+          export TOKEN_SOURCE="$token_source"
+          export REPOSITORY_PATCH_EXIT="$repository_patch_exit"
+          export TOPICS_EXIT="$topics_exit"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = Path(os.environ["EVIDENCE_DIR"])
+          result = {
+              "token_source": os.environ["TOKEN_SOURCE"],
+              "repository_patch_exit": int(os.environ["REPOSITORY_PATCH_EXIT"]),
+              "topics_exit": int(os.environ["TOPICS_EXIT"]),
+              "requested_default_branch": "main",
+              "requested_topics": [
+                  "lean4",
+                  "mathlib",
+                  "formal-mathematics",
+                  "theorem-proving",
+                  "formal-verification",
+                  "ai-assisted-mathematics",
+              ],
+          }
+          (evidence / "repository-metadata-result.json").write_text(
+              json.dumps(result, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          if [[ "$repository_patch_exit" -ne 0 ]]; then
+            echo "Repository description/default-branch API update was not authorized; main was already the default branch."
+          fi
+          if [[ "$topics_exit" -ne 0 ]]; then
+            echo "Topics API update was not authorized by the available token; desired topics remain recorded in repository metadata."
+          fi
+
+      - name: Commit the verified standalone artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf _source
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No publication changes to commit."
+          else
+            git commit -m "Publish verified standalone formalization audit v1.0.0"
+            git push origin HEAD:main
+          fi
+
+      - name: Create the immutable tag and GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_sha="$(git rev-parse HEAD)"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            git fetch --tags origin
+            tagged_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+            test "$tagged_sha" = "$release_sha"
+          else
+            git tag -a "$RELEASE_TAG" -m "Research Paper Formalization Audit $RELEASE_TAG"
+            git push origin "$RELEASE_TAG"
+          fi
+
+          cp RELEASE_NOTES.md /tmp/release-notes.md
+          {
+            echo
+            echo "## Exact release authority"
+            echo
+            echo "- release commit: \`$release_sha\`"
+            echo "- source commit: \`$SOURCE_SHA\`"
+            echo "- upstream Mathlib commit: \`$MATHLIB_SHA\`"
+            echo "- Lean toolchain: \`$LEAN_TOOLCHAIN\`"
+          } >> /tmp/release-notes.md
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --title "Research Paper Formalization Audit $RELEASE_TAG" \
+              --notes-file /tmp/release-notes.md \
+              --latest
+          else
+            gh release create "$RELEASE_TAG" \
+              --title "Research Paper Formalization Audit $RELEASE_TAG" \
+              --notes-file /tmp/release-notes.md \
+              --latest \
+              --verify-tag
+          fi
+
+          gh release upload "$RELEASE_TAG" "$EVIDENCE_DIR"/* --clobber
+
+      - name: Upload workflow evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-release-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/release-v1.0.0/
+          if-no-files-found: warn
+          retention-days: 90
