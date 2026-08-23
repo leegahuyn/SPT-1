@@ -1,0 +1,7 @@
+.lake/
+*.olean
+*.ilean
+*.trace
+*.tmp
+.DS_Store
+_source/
