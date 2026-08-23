@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: >-
+  If you use this formalization audit, cite the exact GitHub release and,
+  when relevant, cite the underlying manuscript bundle and Mathlib separately.
+title: "Research Paper Formalization Audit"
+type: software
+authors:
+  - family-names: "Lee"
+    given-names: "Ga Hyun"
+version: "1.0.0"
+date-released: 2026-08-24
+repository-code: "https://github.com/leegahuyn/SPT-1"
+url: "https://github.com/leegahuyn/SPT-1/releases/tag/v1.0.0"
+license: Apache-2.0
+abstract: >-
+  AI-assisted Lean 4 and Mathlib audit of ten mathematical manuscript
+  sketches comprising 507 pages. The artifact publishes machine-checkable
+  proofs, explicit assumptions, conditional results, certificates, formal
+  interfaces, corrections, counterexamples, and reproducible build evidence
+  for the formalizable cores represented by the Lean declarations. It does
+  not claim that every sentence of every manuscript has been proved.
+keywords:
+  - Lean 4
+  - Mathlib
+  - formal mathematics
+  - theorem proving
+  - formal verification
+  - AI-assisted mathematics
