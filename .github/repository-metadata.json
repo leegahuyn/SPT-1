@@ -1,0 +1,17 @@
+{
+  "title": "Research Paper Formalization Audit",
+  "description": "AI-assisted Lean 4/Mathlib audit of 10 mathematical manuscript sketches (507 pages), with proofs, assumptions, corrections, counterexamples, and reproducible evidence.",
+  "default_branch": "main",
+  "topics": [
+    "lean4",
+    "mathlib",
+    "formal-mathematics",
+    "theorem-proving",
+    "formal-verification",
+    "ai-assisted-mathematics"
+  ],
+  "source_repository": "leegahuyn/mathlib4",
+  "source_ref": "frozen-pre-release-2026-08-24",
+  "source_commit": "3fa18fa989b78eb5bd7068122ced45fc2b6a7b74",
+  "release": "v1.0.0"
+}
