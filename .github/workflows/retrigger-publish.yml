@@ -1,26 +1,16 @@
-name: Dispatch corrected standalone publication
+name: Retired standalone publication dispatcher
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/retrigger-publish.yml"
   workflow_dispatch:
 
 permissions:
-  actions: write
   contents: read
 
 jobs:
-  dispatch:
+  retired:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch the current publication workflow on main
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Explain retirement
         run: |
-          set -euo pipefail
-          gh workflow run publish.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main
+          echo "This SPT-1 copy-based publication route is retired."
+          echo "Publication and verification now target the complete leegahuyn/mathlib4 frozen-pre-release-2026-08-24 branch."
