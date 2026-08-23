@@ -13,7 +13,7 @@ This is the first standalone publication release of the AI-assisted Lean 4 / Mat
 - pinned Lean and Mathlib dependencies;
 - explicit AI-use disclosure and result-status vocabulary;
 - machine-readable and human-readable citation metadata;
-- immutable source provenance;
+- immutable frozen-source provenance plus an audit-recorded derived-release patch;
 - forbidden-feature audit tooling;
 - clean-build and direct-replay logs;
 - source inventories and SHA-256 hashes.
@@ -25,9 +25,13 @@ This is the first standalone publication release of the AI-assisted Lean 4 / Mat
 - Lean toolchain: `leanprover/lean4:v4.33.0-rc1`;
 - manuscript bundle SHA-256: `12eb737301b3312dbad255f7b6d2f74c43c9ba27a2955157c134d36c9c0e53c5`.
 
+## Deterministic publication rewrite
+
+The frozen source is not altered. In the standalone copy, the sole `native_decide` occurrence in `PrimalitySheafVerification/Verification.lean`—a nine-element `ZMod 9` finite-cardinality certificate—is replaced with `decide`. The proposition is unchanged. The release audit records the exact before/after text and source SHA-256 values and rejects any unexpected match count.
+
 ## Release gate
 
-The release is created only after the publication workflow reports success for the source audit, two clean aggregate builds, and two direct `BuildAll.lean` replays. The corresponding evidence files are attached to the release and committed under `evidence/release-v1.0.0/`.
+The release is created only after the publication workflow reports success for the deterministic rewrite, the prohibited-feature audit, two clean aggregate builds, and two direct `BuildAll.lean` replays. The corresponding evidence files are attached to the release and committed under `evidence/release-v1.0.0/`.
 
 ## Scope limitation
 
