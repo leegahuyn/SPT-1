@@ -9,13 +9,21 @@
 
 ## Frozen source authority
 
-The Lean sources in this standalone repository are copied, without selecting a later moving branch, from:
+The standalone Lean tree is derived, without selecting a later moving branch, from:
 
 - source repository: `leegahuyn/mathlib4`;
 - source ref: `frozen-pre-release-2026-08-24`;
 - exact source commit: `3fa18fa989b78eb5bd7068122ced45fc2b6a7b74`.
 
-The source snapshot is retained as a historical provenance anchor. It is not rewritten or deleted by the standalone publication workflow.
+The frozen source snapshot remains untouched as the historical authority. The standalone publication workflow copies that tree and then applies exactly one deterministic, audit-recorded release rewrite:
+
+- file: `PrimalitySheafVerification/Verification.lean`;
+- statement: the finite `ZMod 9` kernel-cardinality certificate;
+- frozen proof: `by native_decide`;
+- standalone proof: `by decide`;
+- purpose: remove native-code execution from the published proof source while retaining a kernel-reduced decision proof of the same proposition.
+
+The audit report records the before-and-after source SHA-256 values and refuses to proceed unless the frozen input matches exactly one expected occurrence. No other source rewrite is approved by the release tooling.
 
 ## Dependency authority
 
@@ -36,7 +44,8 @@ The publication workflow checks whether the frozen source modified `Mathlib/`, `
 
 A verified release preserves, at minimum:
 
-- the exact source and dependency identifiers;
+- the exact frozen-source and dependency identifiers;
+- the deterministic publication-rewrite record and before/after hashes;
 - the Lean and Lake versions observed on the runner;
 - an inventory and SHA-256 list for the published source files;
 - the forbidden-feature audit result;
